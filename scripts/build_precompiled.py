@@ -12,10 +12,28 @@ def txt(x): return re.sub(r'\s+',' ',x.get_text(' ',strip=True)).strip()
 def esc(s): return html.escape(s or '',quote=True)
 def pack(n):
     fs=[Path('exact-v3/l1.js')] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))
+    if not fs or any(not p.exists() for p in fs):
+        raise RuntimeError(f'Packed source files missing for lesson {n}: {fs}')
     s=''.join(p.read_text(encoding='utf8') for p in fs)
-    b=''.join(re.findall(r"'([A-Za-z0-9+/=]{500,})'",s))
-    if not b: raise RuntimeError(f'No packed source for lesson {n}')
-    return gzip.decompress(base64.b64decode(b)).decode('utf8')
+    # PACKED files use either window.PACKED[n]='...' or
+    # window.PACKED[n]=(window.PACKED[n]||'')+'...'.  Read all quoted
+    # base64 fragments instead of assuming a minimum fragment length.
+    parts=[]
+    for q in re.findall(r"'([^']*)'",s):
+        q=q.strip()
+        if q and re.fullmatch(r'[A-Za-z0-9+/=]+',q):
+            parts.append(q)
+    if not parts:
+        raise RuntimeError(f'No packed source for lesson {n}; files={fs}')
+    b=''.join(parts)
+    try:
+        raw=base64.b64decode(b,validate=True)
+    except Exception as e:
+        raise RuntimeError(f'Invalid base64 for lesson {n}: {e}; fragments={len(parts)} chars={len(b)}') from e
+    try:
+        return gzip.decompress(raw).decode('utf8')
+    except Exception as e:
+        raise RuntimeError(f'Invalid gzip payload for lesson {n}: {e}; fragments={len(parts)} chars={len(b)}') from e
 
 def inline(s):
     s=esc(s)
@@ -94,7 +112,11 @@ def cleanlabel(s):
     return s.title() if s.isupper() else s
 
 def build(n):
-    soup=BeautifulSoup(pack(n),'html.parser'); ch=[x for x in soup.body.children if isinstance(x,Tag)]
+    source=pack(n)
+    soup=BeautifulSoup(source,'html.parser')
+    if soup.body is None:
+        raise RuntimeError(f'Packed source for lesson {n} has no <body>')
+    ch=[x for x in soup.body.children if isinstance(x,Tag)]
     major=[{'id':'overview','label':'🌟 Overview','title':'Lesson Overview','subtabs':[]}]
     p1={'id':'part1','label':f'📘 Part 1 · Lesson {n*2-1}','title':'Part 1','subtabs':[]}; p2={'id':'part2','label':f'🧩 Part 2 · Lesson {n*2}','title':'Part 2','subtabs':[]}; hw={'id':'homework','label':'🏠 Homework','title':'Homework','subtabs':[],'html':''}
     cur='overview'; sec={'id':'overview','label':'Overview','title':'Overview','buf':[]}; sections={'overview':[sec],'p1':[],'p2':[],'e1':[],'e2':[]}; ti=0; task=None
@@ -109,7 +131,7 @@ def build(n):
             task['buf'].append('<div class="btnrow"><button class="b check" type="button">✓ Check</button><button class="b answer" type="button">💡 Answer & explanation</button><button class="b reset" type="button">↺ Reset</button><span class="score"></span></div><div class="ansbox" hidden></div></div>'); task=None
     def add(h):
         if task: task['buf'].append(h)
-        else: sec['buf'].append(h)
+        elif sec is not None: sec['buf'].append(h)
     for e in ch:
         ph=phase(e)
         if ph:
@@ -143,7 +165,8 @@ def build(n):
     p1['subtabs']=p1s; p2['subtabs']=p2s; major += [p1,p2,hw]
     d={'id':n,'title':META[n][0],'sub':META[n][1],'major':major}
     (OUT/f'lesson-{n}.js').write_text('window.IELTS_PRECOMPILED=window.IELTS_PRECOMPILED||{};window.IELTS_PRECOMPILED[%d]=%s;'%(n,json.dumps(d,ensure_ascii=False,separators=(',',':'))),encoding='utf8')
-    print(n,ti,(OUT/f'lesson-{n}.js').stat().st_size)
+    print(f'lesson {n}: tasks={ti} bytes={(OUT/f"lesson-{n}.js").stat().st_size}')
+
 for n in range(1,7): build(n)
 idx=Path('index.html').read_text(encoding='utf8')
 start=idx.find('<script src="exact-v3/l1.js"></script>'); end=idx.rfind('</body>')
