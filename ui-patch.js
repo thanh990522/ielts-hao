@@ -1,0 +1,12 @@
+(function(){
+'use strict';
+const totals={1:21,2:22,3:21,4:20,5:21,6:21};
+let busy=false;
+function lid(){const n=document.querySelector('.lesson-tab.on .lnum');return +(n?.textContent||1)}
+function patchMajor(){const id=lid(),b=[...document.querySelectorAll('#majorTabs .tab')];if(b.length>=4){b[0].textContent='🌟 Overview';b[1].textContent=`📘 Part 1 · Lesson ${id*2-1}`;b[2].textContent=`🧩 Part 2 · Lesson ${id*2}`;b[3].textContent='🏠 Homework'}}
+function patchHomework(){const active=[...document.querySelectorAll('#majorTabs .tab')].find(x=>x.classList.contains('on'));if(!active||!/Homework/i.test(active.textContent))return;document.querySelectorAll('#content ul.bullet-list,#content ol.number-list').forEach((list,li)=>{if(list.dataset.interactiveHome)return;list.dataset.interactiveHome='1';const box=document.createElement('div');box.className='home-list';[...list.children].forEach((item,i)=>{const label=document.createElement('label');label.className='homecheck';const input=document.createElement('input');input.type='checkbox';const key=`ielts-hao-home-${lid()}-${li}-${i}-${item.textContent.trim().slice(0,30)}`;try{input.checked=localStorage.getItem(key)==='1'}catch(e){}input.onchange=()=>{try{localStorage.setItem(key,input.checked?'1':'0')}catch(e){}};const span=document.createElement('span');span.innerHTML=item.innerHTML;label.append(input,span);box.append(label)});list.replaceWith(box)})}
+function patchProgress(){const id=lid(),total=totals[id]||0;let done=0;try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||'';if(k.startsWith(`ielts-hao-done-${id}-`)&&localStorage.getItem(k)==='1')done++}}catch(e){}const pct=total?Math.round(done/total*100):0;const f=document.querySelector('#progressFill'),t=document.querySelector('#progressText');if(f)f.style.width=pct+'%';if(t)t.textContent=`${done}/${total} · ${pct}%`}
+function run(){if(busy)return;busy=true;requestAnimationFrame(()=>{patchMajor();patchHomework();patchProgress();busy=false})}
+new MutationObserver(run).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']});
+document.addEventListener('DOMContentLoaded',run);setTimeout(run,500);setTimeout(run,1500);
+})();
