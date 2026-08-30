@@ -29,6 +29,24 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Diagnose packed Lesson 1
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('exact-v3/l1.js').read_text(encoding='utf8-sig')
+          print('chars=',len(s))
+          print('head=',repr(s[:120]))
+          print('tail=',repr(s[-120:]))
+          print('single_quotes=',s.count("'"),'double_quotes=',s.count('"'))
+          vals=re.findall(r"'([^']*)'",s)
+          print('quoted_count=',len(vals),'lengths=',[len(x) for x in vals])
+          allowed=set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
+          for i,q in enumerate(vals):
+              bad=sorted(set(q)-allowed)
+              print('quoted',i,'len',len(q),'bad_sample',repr(bad[:20]),'head',repr(q[:30]))
+          PY
+
       - name: Prebuild interactive lessons
         run: |
           python -m pip install --quiet beautifulsoup4
