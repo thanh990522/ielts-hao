@@ -29,27 +29,31 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Diagnose packed Lesson 1
+      - name: Validate complete packed Lesson 1
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-          s=Path('exact-v3/l1.js').read_text(encoding='utf-8-sig')
-          print('chars=',len(s))
-          print('head=',repr(s[:120]))
-          print('tail=',repr(s[-120:]))
-          print('single_quotes=',s.count("'"),'double_quotes=',s.count('"'))
-          vals=re.findall(r"'([^']*)'",s)
-          print('quoted_count=',len(vals),'lengths=',[len(x) for x in vals])
-          allowed=set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
-          for i,q in enumerate(vals):
-              bad=sorted(set(q)-allowed)
-              print('quoted',i,'len',len(q),'bad_sample',repr(bad[:20]),'head',repr(q[:30]))
+          import re,base64,gzip
+          fs=sorted(Path('packed').glob('l1-*.js'))
+          print('files=',[p.name for p in fs])
+          parts=[]
+          for p in fs:
+              s=p.read_text(encoding='utf-8-sig')
+              vals=re.findall(r"'([^']*)'",s)
+              print(p.name,'chars=',len(s),'quotes=',s.count("'"),'quoted_lengths=',[len(x) for x in vals])
+              vals=[re.sub(r'\s+','',x) for x in vals if len(re.sub(r'\s+','',x))>100]
+              if not vals: raise SystemExit(f'No payload in {p}')
+              parts.append(vals[-1])
+          b=''.join(parts)
+          raw=base64.b64decode(b)
+          doc=gzip.decompress(raw).decode('utf-8')
+          print('packed_chars=',len(b),'html_chars=',len(doc),'has_body=',('<body' in doc.lower()),'tasks=',doc.count('TASK '))
           PY
 
       - name: Prebuild interactive lessons
         run: |
           python -m pip install --quiet beautifulsoup4
+          sed -i "s#fs=\[Path('exact-v3/l1.js')\] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-\*.js'))#fs=sorted(Path('packed').glob(f'l{n}-*.js')) if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))#" scripts/build_precompiled.py
           python scripts/build_precompiled.py
           test -f generated/lesson-1.js
           test -f generated/lesson-6.js
