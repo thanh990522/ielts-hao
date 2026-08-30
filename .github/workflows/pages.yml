@@ -34,7 +34,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
-          s=Path('exact-v3/l1.js').read_text(encoding='utf8-sig')
+          s=Path('exact-v3/l1.js').read_text(encoding='utf-8-sig')
           print('chars=',len(s))
           print('head=',repr(s[:120]))
           print('tail=',repr(s[-120:]))
