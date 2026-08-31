@@ -21,51 +21,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Assemble Interactive v9
+        run: |
+          mkdir -p generated
+          for n in 1 2 3 4 5 6; do
+            base64 -d "static-v9/lesson-$n.js.gz.b64" | gzip -dc > "generated/lesson-$n.js"
+            test -s "generated/lesson-$n.js"
+            node --check "generated/lesson-$n.js"
+          done
+          cp index-v9.html index.html
+          node --check interactive-v9.js
 
-      - name: Validate recovered sources
+      - name: Validate lesson structure
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re, base64, gzip
-          expected={1:47125,5:35892}
-          for n in (1,5):
-              s=Path(f'recovered/l{n}.js').read_text(encoding='utf-8-sig')
-              m=re.search(rf"window\.PACKED\[{n}\]='([^']+)'", s)
-              if not m:
-                  raise SystemExit(f'Recovered Lesson {n} payload not found')
-              doc=gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
-              if '<body' not in doc.lower() or len(doc) != expected[n]:
-                  raise SystemExit(f'Recovered Lesson {n} validation failed: {len(doc)} chars')
-              print(f'Recovered Lesson {n} OK: {len(doc)} HTML chars')
+          expected={1:21,2:22,3:21,4:20,5:21,6:21}
+          for n,count in expected.items():
+              s=Path(f'generated/lesson-{n}.js').read_text(encoding='utf-8')
+              got=s.count('class=\\"exercise\\"')
+              if got != count:
+                  raise SystemExit(f'Lesson {n}: expected {count} exercises, found {got}')
+              if f'window.IELTS_PRECOMPILED[{n}]' not in s:
+                  raise SystemExit(f'Lesson {n}: precompiled object missing')
+              print(f'Lesson {n}: {got} interactive exercises OK')
+          idx=Path('index.html').read_text(encoding='utf-8')
+          for bad in ('exact-v2','exact-v3','packed-v8.js','app-v8.js','interactive-v3.js'):
+              if bad in idx:
+                  raise SystemExit(f'Old runtime reference still present: {bad}')
+          for good in ('Interactive v9','interactive-v9.js','generated/lesson-1.js','generated/lesson-6.js'):
+              if good not in idx:
+                  raise SystemExit(f'Missing v9 reference: {good}')
+          print('Interactive v9 structure validation passed')
           PY
-
-      - name: Prebuild interactive lessons
-        run: |
-          python -m pip install --quiet beautifulsoup4
-          python - <<'PY'
-          from pathlib import Path
-          p=Path('scripts/build_precompiled.py')
-          s=p.read_text(encoding='utf-8')
-          old="fs=[Path('exact-v3/l1.js')] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
-          new="fs=[Path(f'recovered/l{n}.js')] if n in (1,5) else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
-          if old not in s:
-              raise SystemExit('Lesson source selector not found')
-          p.write_text(s.replace(old,new,1),encoding='utf-8')
-          PY
-          python scripts/build_precompiled.py | tee build.log
-          grep -q 'lesson 1: tasks=21' build.log
-          grep -q 'lesson 2: tasks=22' build.log
-          grep -q 'lesson 3: tasks=21' build.log
-          grep -q 'lesson 4: tasks=20' build.log
-          grep -q 'lesson 5: tasks=21' build.log
-          grep -q 'lesson 6: tasks=21' build.log
-          for f in generated/lesson-*.js; do test -s "$f"; node --check "$f"; done
-          grep -q 'Interactive v7' index.html
-          node --check interactive-v3.js
 
       - name: Upload validated site
         if: github.ref == 'refs/heads/main'
