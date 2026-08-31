@@ -2,7 +2,7 @@ name: Deploy GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, static-v8-final]
   workflow_dispatch:
 
 permissions:
@@ -11,15 +11,15 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   deploy:
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,46 +29,61 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Validate complete packed Lesson 1
+      - name: Validate recovered Lesson 1
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re,base64,gzip
-          fs=sorted(Path('packed').glob('l1-*.js'))
-          print('files=',[p.name for p in fs])
-          parts=[]
-          for p in fs:
-              s=p.read_text(encoding='utf-8-sig')
-              vals=re.findall(r"'([^']*)'",s)
-              print(p.name,'chars=',len(s),'quotes=',s.count("'"),'quoted_lengths=',[len(x) for x in vals])
-              vals=[re.sub(r'\s+','',x) for x in vals if len(re.sub(r'\s+','',x))>100]
-              if not vals: raise SystemExit(f'No payload in {p}')
-              parts.append(vals[-1])
-          b=''.join(parts)
-          raw=base64.b64decode(b)
-          doc=gzip.decompress(raw).decode('utf-8')
-          print('packed_chars=',len(b),'html_chars=',len(doc),'has_body=',('<body' in doc.lower()),'tasks=',doc.count('TASK '))
+          import re, base64, gzip
+          p=Path('recovered/l1.js')
+          s=p.read_text(encoding='utf-8-sig')
+          m=re.search(r"window\.PACKED\[1\]='([^']+)'", s)
+          if not m:
+              raise SystemExit('Recovered Lesson 1 payload not found')
+          doc=gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
+          if '<body' not in doc.lower():
+              raise SystemExit('Recovered Lesson 1 has no body')
+          print('Recovered Lesson 1 OK:', len(doc), 'HTML chars')
           PY
 
       - name: Prebuild interactive lessons
         run: |
           python -m pip install --quiet beautifulsoup4
-          sed -i "s#fs=\[Path('exact-v3/l1.js')\] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-\*.js'))#fs=sorted(Path('packed').glob(f'l{n}-*.js')) if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))#" scripts/build_precompiled.py
-          python scripts/build_precompiled.py
-          test -f generated/lesson-1.js
-          test -f generated/lesson-6.js
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/build_precompiled.py')
+          s=p.read_text(encoding='utf-8')
+          old="fs=[Path('exact-v3/l1.js')] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
+          new="fs=[Path('recovered/l1.js')] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
+          if old not in s:
+              raise SystemExit('Lesson source selector not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          python scripts/build_precompiled.py | tee build.log
+          grep -q 'lesson 1: tasks=21' build.log
+          grep -q 'lesson 2: tasks=22' build.log
+          grep -q 'lesson 3: tasks=21' build.log
+          grep -q 'lesson 4: tasks=20' build.log
+          grep -q 'lesson 5: tasks=21' build.log
+          grep -q 'lesson 6: tasks=21' build.log
+          test -s generated/lesson-1.js
+          test -s generated/lesson-6.js
           grep -q 'Interactive v7' index.html
+          node --check interactive-v3.js
+          for f in generated/lesson-*.js; do node --check "$f"; done
 
       - name: Configure Pages
+        if: github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
       - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
 
       - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
         id: deployment
         uses: actions/deploy-pages@v4
