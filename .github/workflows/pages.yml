@@ -31,14 +31,15 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re, base64, gzip
-          for n in range(1, 7):
+          expected={1:47125,5:35892}
+          for n in (1,5):
               s=Path(f'recovered/l{n}.js').read_text(encoding='utf-8-sig')
               m=re.search(rf"window\.PACKED\[{n}\]='([^']+)'", s)
               if not m:
                   raise SystemExit(f'Recovered Lesson {n} payload not found')
               doc=gzip.decompress(base64.b64decode(m.group(1))).decode('utf-8')
-              if '<body' not in doc.lower():
-                  raise SystemExit(f'Recovered Lesson {n} has no body')
+              if '<body' not in doc.lower() or len(doc) != expected[n]:
+                  raise SystemExit(f'Recovered Lesson {n} validation failed: {len(doc)} chars')
               print(f'Recovered Lesson {n} OK: {len(doc)} HTML chars')
           PY
 
@@ -50,7 +51,7 @@ jobs:
           p=Path('scripts/build_precompiled.py')
           s=p.read_text(encoding='utf-8')
           old="fs=[Path('exact-v3/l1.js')] if n==1 else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
-          new="fs=[Path(f'recovered/l{n}.js')]"
+          new="fs=[Path(f'recovered/l{n}.js')] if n in (1,5) else sorted(Path('exact-v2').glob(f'l{n}-*.js'))"
           if old not in s:
               raise SystemExit('Lesson source selector not found')
           p.write_text(s.replace(old,new,1),encoding='utf-8')
