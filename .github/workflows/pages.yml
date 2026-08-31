@@ -21,37 +21,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Diagnose static v9 payloads
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64,gzip,re
-          for n in range(1,7):
-              p=Path(f'static-v9/lesson-{n}.js.gz.b64')
-              s=p.read_text(encoding='utf-8-sig')
-              clean=re.sub(r'\s+','',s)
-              bad=sorted(set(clean)-set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='))
-              print(f'lesson {n}: chars={len(s)} clean={len(clean)} mod4={len(clean)%4} bad={bad[:20]}')
-              try:
-                  raw=base64.b64decode(clean,validate=True)
-                  print(f'lesson {n}: base64 OK bytes={len(raw)}')
-                  doc=gzip.decompress(raw)
-                  print(f'lesson {n}: gzip OK jsbytes={len(doc)}')
-              except Exception as e:
-                  print(f'lesson {n}: FAIL {type(e).__name__}: {e}')
-          PY
-
       - name: Assemble Interactive v9
         run: |
           mkdir -p generated
           python - <<'PY'
           from pathlib import Path
-          import base64,gzip,re
+          import base64, gzip, hashlib, re
+
+          expected_sha={
+              1:'56450782b70a6bc27cc8571c46dc391ceb7895d4446465811fc36aa1614381ec',
+              2:'e34d8fa9c0b7122c4b1b4e4465e4a39435a7d597c25d3bd8d0a6dc8aa36fa4cc',
+              3:'8a3dc83f947674b635a5fe5c8ae9370115b33a5f181483652500b7eac090eefc',
+              4:'935bcbc00bca84c6d38a4363cf156ecef59ba372762f1309a46e68be4f67dfa1',
+              5:'45e2205d8dcb4a1f6b4c44fc01953a69f8503e463dcee7454d54290e43ba8512',
+              6:'e51663941d4f71046182e06f7c26eb3778999e9e9d3972f727328878c4cd593b',
+          }
           for n in range(1,7):
-              s=Path(f'static-v9/lesson-{n}.js.gz.b64').read_text(encoding='utf-8-sig')
-              clean=re.sub(r'\s+','',s)
+              if n in (1,3,4):
+                  files=sorted(Path('static-v9-fix').glob(f'l{n}-*.b64'))
+                  if not files:
+                      raise SystemExit(f'Lesson {n}: repair chunks missing')
+                  text=''.join(p.read_text(encoding='utf-8-sig') for p in files)
+              else:
+                  text=Path(f'static-v9/lesson-{n}.js.gz.b64').read_text(encoding='utf-8-sig')
+              clean=re.sub(r'\s+','',text)
+              sha=hashlib.sha256(clean.encode()).hexdigest()
+              if sha != expected_sha[n]:
+                  raise SystemExit(f'Lesson {n}: SHA mismatch {sha}')
               raw=base64.b64decode(clean,validate=True)
-              Path(f'generated/lesson-{n}.js').write_bytes(gzip.decompress(raw))
+              js=gzip.decompress(raw)
+              Path(f'generated/lesson-{n}.js').write_bytes(js)
+              print(f'Lesson {n}: SHA/base64/gzip OK · {len(js)} bytes')
           PY
           for n in 1 2 3 4 5 6; do
             test -s "generated/lesson-$n.js"
@@ -72,7 +72,9 @@ jobs:
                   raise SystemExit(f'Lesson {n}: expected {count} exercises, found {got}')
               if f'window.IELTS_PRECOMPILED[{n}]' not in s:
                   raise SystemExit(f'Lesson {n}: precompiled object missing')
-              print(f'Lesson {n}: {got} interactive exercises OK')
+              if 'major' not in s or 'subtabs' not in s:
+                  raise SystemExit(f'Lesson {n}: tab/subtab structure missing')
+              print(f'Lesson {n}: {got} interactive exercises + tab/subtab structure OK')
           idx=Path('index.html').read_text(encoding='utf-8')
           for bad in ('exact-v2','exact-v3','packed-v8.js','app-v8.js','interactive-v3.js'):
               if bad in idx:
