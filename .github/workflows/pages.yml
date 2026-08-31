@@ -21,11 +21,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Diagnose static v9 payloads
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          for n in range(1,7):
+              p=Path(f'static-v9/lesson-{n}.js.gz.b64')
+              s=p.read_text(encoding='utf-8-sig')
+              clean=re.sub(r'\s+','',s)
+              bad=sorted(set(clean)-set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='))
+              print(f'lesson {n}: chars={len(s)} clean={len(clean)} mod4={len(clean)%4} bad={bad[:20]}')
+              try:
+                  raw=base64.b64decode(clean,validate=True)
+                  print(f'lesson {n}: base64 OK bytes={len(raw)}')
+                  doc=gzip.decompress(raw)
+                  print(f'lesson {n}: gzip OK jsbytes={len(doc)}')
+              except Exception as e:
+                  print(f'lesson {n}: FAIL {type(e).__name__}: {e}')
+          PY
+
       - name: Assemble Interactive v9
         run: |
           mkdir -p generated
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,re
+          for n in range(1,7):
+              s=Path(f'static-v9/lesson-{n}.js.gz.b64').read_text(encoding='utf-8-sig')
+              clean=re.sub(r'\s+','',s)
+              raw=base64.b64decode(clean,validate=True)
+              Path(f'generated/lesson-{n}.js').write_bytes(gzip.decompress(raw))
+          PY
           for n in 1 2 3 4 5 6; do
-            base64 -d "static-v9/lesson-$n.js.gz.b64" | gzip -dc > "generated/lesson-$n.js"
             test -s "generated/lesson-$n.js"
             node --check "generated/lesson-$n.js"
           done
